@@ -1,4 +1,4 @@
-package websocket
+package sshtransport
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ type listener struct {
 
 	closed   chan struct{}
 	incoming chan *Conn
-	t        *WebsocketTransport
+	t        *SSHTransport
 }
 
 func (l *listener) Close() error {
@@ -60,7 +60,7 @@ func (l *listener) Accept() (transport.CapableConn, error) {
 		if !ok {
 			return nil, fmt.Errorf("listener is closed")
 		}
-		return SSHMuxTransport.NewConn(c, true)
+		return l.t.NewConn(c, true)
 	case <-l.closed:
 		return nil, fmt.Errorf("listener is closed")
 	}

@@ -1,4 +1,4 @@
-package websocket
+package sshtransport
 
 import (
 	"fmt"
@@ -18,7 +18,7 @@ var _ net.Addr = (*Addr)(nil)
 
 // Network returns the network type for a WebSocket, "websocket".
 func (addr *Addr) Network() string {
-	return "websocket"
+	return "wssh"
 }
 
 // NewAddr creates a new Addr using the given host string
@@ -55,7 +55,7 @@ func ParseWebsocketNetAddr(a net.Addr) (ma.Multiaddr, error) {
 		return nil, err
 	}
 
-	wsma, err := ma.NewMultiaddr("/ws")
+	wsma, err := ma.NewMultiaddr("/wssh")
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,7 @@ require (
 	github.com/whyrusleeping/go-smux-spdystream v0.0.0-20170912225229-a6182ff2a058
 	github.com/whyrusleeping/go-smux-yamux v2.0.9+incompatible
 	github.com/whyrusleeping/yamux v1.2.0 // indirect
+	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a
 )
 
 go 1.13
