@@ -1,4 +1,4 @@
-package sshtransport
+package wstransport
 
 import (
 	"io"
@@ -10,6 +10,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/libp2p/go-libp2p-core/peer"
 	manet "github.com/multiformats/go-multiaddr/net"
 
 	ws "github.com/gorilla/websocket"
@@ -17,7 +18,17 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
+// WS is used for compatibility with 'legacy' infrastructure.
+// HTTP/2 POST is another option - it may work in cases where WS doesn't.
+// If 'legacy' is not a problem - use H2 POST or QUIC
+//
+//
+
 // Adapter for Gorilla Websocket.
+// Alternatives:
+// - x/net/websocket - seems to be deprecated
+// - nhooyr.io/websocket - may be better, but not urgent to change.
+
 
 // GracefulCloseTimeout is the time to wait trying to gracefully close a
 // connection before simply cutting it.
@@ -164,15 +175,26 @@ var upgrader = ws.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
+	Subprotocols: []string{PROTO_SSH},
 }
 
-func (t *SSHTransport) maDial(ctx context.Context, raddr ma.Multiaddr) (transport.CapableConn, error) {
+const PROTO_SSH = "/ssh/1.0"
+
+func (t *SSHTransport) maDial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (transport.CapableConn, error) {
 	wsurl, err := parseMultiaddr(raddr)
 	if err != nil {
 		return nil, err
 	}
 
-	wscon, _, err := ws.DefaultDialer.Dial(wsurl, nil)
+	wscl := &ws.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		HandshakeTimeout: 5 * time.Second,
+		Subprotocols: []string{
+			PROTO_SSH,
+		},
+	}
+
+	wscon, _, err := wscl.Dial(wsurl, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +205,11 @@ func (t *SSHTransport) maDial(ctx context.Context, raddr ma.Multiaddr) (transpor
 		return nil, err
 	}
 
-	return t.NewConn(mnc, false)
+	if PROTO_SSH == wscon.Subprotocol() {
+
+	}
+
+	return t.NewCapableConn(mnc, false)
 }
 
 func (t *SSHTransport) maListen(a ma.Multiaddr) (transport.Listener, error) {
@@ -212,14 +238,6 @@ func (t *SSHTransport) maListen(a ma.Multiaddr) (transport.Listener, error) {
 		t.Mux.Handle(t.Prefix, malist)
 	} else {
 		go malist.serve()
-	}
-	return malist, nil
-}
-
-func (t *SSHTransport) Listen(a ma.Multiaddr) (transport.Listener, error) {
-	malist, err := t.maListen(a)
-	if err != nil {
-		return nil, err
 	}
 	return malist, nil
 }

@@ -1,4 +1,4 @@
-package sshtransport
+package wstransport
 
 import (
 	"context"
@@ -138,7 +138,12 @@ func runServer(port string) error {
 }
 
 func handleConn(conn tpt.CapableConn) error {
-	log.Printf("Accepted new connection from %s (%s)\n", conn.RemotePeer(), conn.RemoteMultiaddr())
+	r, _ := conn.RemotePublicKey().Raw()
+
+	// Extra "ACQIARIg" in base64 for ED
+	log.Printf("Accepted new connection from %s (%s) b64=%s k64=%s\n", conn.RemotePeer(), conn.RemoteMultiaddr(),
+		base64.URLEncoding.EncodeToString([]byte(conn.RemotePeer())),
+		base64.URLEncoding.EncodeToString(r))
 	log.Println(conn.RemotePeer().String(), conn.RemoteMultiaddr().String(),
 		conn.RemotePublicKey())
 

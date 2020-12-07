@@ -1,4 +1,4 @@
-package sshtransport
+package wstransport
 
 import (
 	"context"
@@ -10,36 +10,9 @@ import (
 	"github.com/libp2p/go-libp2p-core/pnet"
 	"github.com/libp2p/go-libp2p-core/transport"
 	ma "github.com/multiformats/go-multiaddr"
-	mafmt "github.com/multiformats/go-multiaddr-fmt"
-	manet "github.com/multiformats/go-multiaddr/net"
 	"golang.org/x/crypto/ssh"
 )
 
-// WsFmt is multiaddr formatter for WsProtocol
-var WsFmt = mafmt.And(mafmt.TCP, mafmt.Base(ma.P_WS))
-
-// WsCodec is the multiaddr-net codec definition for the websocket transport
-var WsCodec = &manet.NetCodec{
-	NetAddrNetworks:  []string{"wssh"},
-	ProtocolName:     "wssh",
-	ConvertMultiaddr: ConvertWebsocketMultiaddrToNetAddr,
-	ParseNetAddr:     ParseWebsocketNetAddr,
-}
-
-// This is _not_ WsFmt because we want the transport to stick to dialing fully
-// resolved addresses.
-var dialMatcher = mafmt.And(mafmt.IP, mafmt.Base(ma.P_TCP), mafmt.Base(ma.P_WS))
-
-const P_SSH = 0x11DE
-
-func init() {
-	manet.RegisterNetCodec(WsCodec)
-	ma.AddProtocol(ma.Protocol{
-		Name:  "wssh",
-		Code:  P_SSH,
-		VCode: ma.CodeToVarint(P_SSH),
-	})
-}
 
 var _ transport.Transport = (*SSHTransport)(nil)
 
@@ -68,6 +41,19 @@ func (t *SSHTransport) Proxy() bool {
 	return false
 }
 
+// Dial creates a secure multiplexed CapableConn to the peer identified by a public key,
+// using an address. The ID is derived from the proto-representation of the key - either
+// SHA256 or the actual key if len <= 42
 func (t *SSHTransport) Dial(ctx context.Context, raddr ma.Multiaddr, p peer.ID) (transport.CapableConn, error) {
-	return t.maDial(ctx, raddr)
+	// Implemented in one of the WS libraries. Need to find the most efficient.
+	return t.maDial(ctx, raddr, p)
 }
+
+func (t *SSHTransport) Listen(a ma.Multiaddr) (transport.Listener, error) {
+	malist, err := t.maListen(a)
+	if err != nil {
+		return nil, err
+	}
+	return malist, nil
+}
+

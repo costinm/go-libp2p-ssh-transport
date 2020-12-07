@@ -1,7 +1,8 @@
-package sshtransport
+package wstransport
 
 import (
 	"crypto/ed25519"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log"
@@ -11,191 +12,63 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/connmgr"
 	ic "github.com/libp2p/go-libp2p-core/crypto"
+	crypto_pb "github.com/libp2p/go-libp2p-core/crypto/pb"
 	"github.com/libp2p/go-libp2p-core/mux"
-	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p-core/pnet"
 	"github.com/libp2p/go-libp2p-core/transport"
-	ma "github.com/multiformats/go-multiaddr"
-	manet "github.com/multiformats/go-multiaddr/net"
 	"golang.org/x/crypto/ssh"
 )
+
 
 // errClosed is returned when trying to accept a stream from a closed connection
 var errClosed = errors.New("conn closed")
 const sshVersion = "SSH-2.0-dmesh"
 
-type stream struct {
-	ch ssh.Channel
-}
-
-func (c *stream) Read(p []byte) (n int, err error) {
-	return c.ch.Read(p)
-}
-
-func (c *stream) Write(p []byte) (n int, err error) {
-	return c.ch.Write(p)
-}
-
-func (c *stream) Close() error {
-	return c.ch.Close()
-}
-
-func (c *stream) CloseRead() error {
-	return c.ch.Close()
-}
-
-func (c *stream) Reset() error {
-	return c.ch.Close()
-}
-
-func (c *stream) CloseWrite() error {
-	return c.ch.CloseWrite()
-}
-
-func (c *stream) SetDeadline(t time.Time) error {
-	return nil
-}
-
-func (c *stream) SetReadDeadline(t time.Time) error {
-	return nil
-}
-
-func (c *stream) SetWriteDeadline(t time.Time) error {
-	return nil
-}
-
-// Conn is a connection to a remote peer.
-type SSHConn struct {
-	// ServerConn - also has Permission
-	// Client - few internal fields
-	sc ssh.Conn
-
-	streamQueue chan ssh.Channel
-
-	closed chan struct{}
-
-	scl *ssh.Client
-
-	// Original con, with remote/local addr
-	wsCon     net.Conn
-
-	inChans   <-chan ssh.NewChannel
-	req       <-chan *ssh.Request
-
-	LastSeen    time.Time
-	ConnectTime time.Time
-
-	// Includes the private key of this node
-	t         *SSHTransport // transport.Transport
-
-	remotePub ssh.PublicKey
-}
-
-func (c *SSHConn) LocalPeer() peer.ID {
-	p, _ := peer.IDFromPrivateKey(c.t.Key)
-	return p
-}
-
-func (c *SSHConn) LocalPrivateKey() ic.PrivKey {
-	return c.t.Key
-}
-
-func (c *SSHConn) RemotePeer() peer.ID {
-	p, _ := peer.IDFromPublicKey(c.RemotePublicKey())
-	return p
-}
-
-func (c *SSHConn) RemotePublicKey() ic.PubKey {
-	kb := c.remotePub.(ssh.CryptoPublicKey)
-	pubk := kb.CryptoPublicKey()
-	edk := pubk.(ed25519.PublicKey)
-
-	//stdMarshal := c.remotePub.Marshal()
-	pk, _ := ic.UnmarshalEd25519PublicKey(edk)
-	return pk
-}
-
-func (c *SSHConn) LocalMultiaddr() ma.Multiaddr {
-	r, _ := manet.FromNetAddr(c.wsCon.LocalAddr())
-	return r
-}
-
-func (c *SSHConn) RemoteMultiaddr() ma.Multiaddr {
-	r, _ := manet.FromNetAddr(c.wsCon.RemoteAddr())
-	return r
-}
-
-func (c *SSHConn) Transport() transport.Transport {
-	return c.t
-}
-
-func (c *SSHConn) Close() error {
-	var err error
-	if c.sc != nil {
-		err = c.sc.Close()
-	} else {
-		err = c.scl.Close()
-	}
-	if err != nil {
-		return err
-	}
-	if !c.IsClosed() {
-		close(c.closed)
-	}
-	return nil
-}
-
-func (c *SSHConn) IsClosed() bool {
-	select {
-	case <-c.closed:
-		return true
-	default:
-		return false
-	}
-}
 
 
-// OpenStream creates a new stream.
-// This uses the same channel in both directions.
-func (c *SSHConn) OpenStream() (mux.MuxedStream, error) {
-	if c.sc != nil {
-		s, r, err := c.sc.OpenChannel("direct-tcpip", []byte{})
+func PrivKey2SSH(key ic.PrivKey) (ssh.Signer, error) {
+	keyB, _ := key.Raw()
+
+	switch key.Type() {
+	case crypto_pb.KeyType_Ed25519:
+		ed := ed25519.PrivateKey(keyB)
+		signer, err := ssh.NewSignerFromKey(ed) // ssh.Signer
 		if err != nil {
 			return nil, err
 		}
-		go ssh.DiscardRequests(r)
-		return &stream{ch: s}, nil
-	} else {
-		s, r, err := c.scl.OpenChannel("direct-tcpip", []byte{})
+		return signer, nil
+	case crypto_pb.KeyType_RSA:
+		// RSA: bytes is the DER form
+		rsa, err := x509.ParsePKCS1PrivateKey(keyB)
 		if err != nil {
 			return nil, err
 		}
-		go ssh.DiscardRequests(r)
-		return &stream{ch: s}, nil
-	}
-}
+			signer, _ := ssh.NewSignerFromKey(rsa)
+			return signer, nil
 
-// AcceptStream accepts a stream opened by the other side.
-func (c *SSHConn) AcceptStream() (mux.MuxedStream, error) {
-	if c.IsClosed() {
-		return nil, errClosed
+	case crypto_pb.KeyType_ECDSA:
+		ed, err := x509.ParseECPrivateKey(keyB)
+		if err != nil {
+			return nil, err
+		}
+			signer, _ := ssh.NewSignerFromKey(ed)
+			return signer, nil
+
+	//case crypto_pb.KeyType_Secp256k1:
+		// Not supported
 	}
-	select {
-	case <-c.closed:
-		return nil, errClosed
-	case s := <-c.streamQueue:
-		return &stream{ch:s}, nil
-	}
+
+	return nil, errors.New("Unsupported")
 }
 
 // NewWsSshTransport creates a new transport using Websocket and SSH
 // Based on QUIC transport.
 //
 func NewSSHTransport(key ic.PrivKey, psk pnet.PSK, gater connmgr.ConnectionGater) (*SSHTransport, error) {
-	keyB, _ := key.Raw()
-	// TODO: RSA, EC256
-	ed := ed25519.PrivateKey(keyB)
-	signer, _ := ssh.NewSignerFromKey(ed) // ssh.Signer
+	signer, err := PrivKey2SSH(key)
+	if err != nil {
+		return nil, err
+	}
 
 	return &SSHTransport{
 		Key: key, Psk: psk, Gater: gater,
@@ -244,8 +117,14 @@ func NewSSHTransport(key ic.PrivKey, psk pnet.PSK, gater connmgr.ConnectionGater
 	}, nil
 }
 
+// SSH transport implements the Multiplexer interface, can be used with other transports.
+// The result is also a CapableConn, so no need for the extra security.
+func (t *SSHTransport) NewConn(nc net.Conn, isServer bool) (mux.MuxedConn, error) {
+	return t.NewCapableConn(nc, isServer)
+}
+
 // NewConn wraps a net.Conn using SSH for MUX and security.
-func (t *SSHTransport) NewConn(nc net.Conn, isServer bool) (transport.CapableConn, error) {
+func (t *SSHTransport) NewCapableConn(nc net.Conn, isServer bool) (transport.CapableConn, error) {
 	c := &SSHConn{
 		closed: make(chan struct{}),
 		t: t,
@@ -287,6 +166,16 @@ func (t *SSHTransport) NewConn(nc net.Conn, isServer bool) (transport.CapableCon
 		}
 		client := ssh.NewClient(cc, chans, reqs)
 		c.scl = client
+		// The client adds "forwarded-tcpip" and "forwarded-streamlocal" when ListenTCP is called.
+		// This in turns sends "tcpip-forward" command, with IP:port
+		// The method returns a Listener, with port set.
+		rawCh := client.HandleChannelOpen("raw")
+		go func() {
+			for inCh := range rawCh {
+				log.Println("RAW CHAN", inCh)
+
+			}
+		}()
 		c.inChans = chans
 	}
 

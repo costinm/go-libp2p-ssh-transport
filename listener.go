@@ -1,4 +1,4 @@
-package sshtransport
+package wstransport
 
 import (
 	"fmt"
@@ -60,7 +60,7 @@ func (l *listener) Accept() (transport.CapableConn, error) {
 		if !ok {
 			return nil, fmt.Errorf("listener is closed")
 		}
-		return l.t.NewConn(c, true)
+		return l.t.NewCapableConn(c, true)
 	case <-l.closed:
 		return nil, fmt.Errorf("listener is closed")
 	}
